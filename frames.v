@@ -27,10 +27,16 @@ Inductive MBot :=
 | MD
 | MODAL_BASED_ON (tests : list ((*test_bot:*)MBot * (*on_bot:*) MBot))
                  (on_results : list BotResult -> BotResult)
-| OtherMBot
-| SelfMBot
+| OtherMBot (delay : nat)
+| SelfMBot (delay : nat)
 | CompleteMBot (b : MBot)
 | WaitMBot (b : MBot).
+
+Fixpoint iter {X} (n : nat) (f : X -> X) : X -> X
+  := fun x => match n with
+                | 0 => x
+                | S n' => f (iter n' f x)
+              end.
 
 Fixpoint replace_self_other_with (with_self_b with_other_b in_b : MBot) : MBot
   := match in_b with
@@ -40,8 +46,8 @@ Fixpoint replace_self_other_with (with_self_b with_other_b in_b : MBot) : MBot
          => MODAL_BASED_ON (List.map (fun b1b2 =>
                                         (replace_self_other_with with_self_b with_other_b (fst b1b2),
                                          replace_self_other_with with_self_b with_other_b (snd b1b2))) tests) f
-       | OtherMBot => with_other_b
-       | SelfMBot => with_self_b
+       | OtherMBot delay => iter delay WaitMBot with_other_b
+       | SelfMBot delay => iter delay WaitMBot with_self_b
        | CompleteMBot b' => CompleteMBot b'
        | WaitMBot b => WaitMBot (replace_self_other_with with_self_b with_other_b b)
      end.
@@ -68,8 +74,16 @@ Definition MKripkeFrame'
          (match b1 with
             | MC => C
             | MD => D
-            | SelfMBot => fst (MKripkeFrame n' b1 b2)
-            | OtherMBot => snd (MKripkeFrame n' b1 b2)
+            | SelfMBot delay
+              => match delay with
+                   | 0 => fst (MKripkeFrame n' b1 b2)
+                   | S d' => fst (MKripkeFrame n' (SelfMBot d') b2)
+                 end
+            | OtherMBot delay
+              => match delay with
+                   | 0 => snd (MKripkeFrame n' b1 b2)
+                   | S d' => fst (MKripkeFrame n' (OtherMBot d') b2)
+                 end
             | MODAL_BASED_ON ls f =>
               f (List.map
                    (fun b1b2 =>
@@ -84,8 +98,16 @@ Definition MKripkeFrame'
           match b2 with
             | MC => C
             | MD => D
-            | SelfMBot => fst (MKripkeFrame n' b2 b1)
-            | OtherMBot => snd (MKripkeFrame n' b2 b1)
+            | SelfMBot delay
+              => match delay with
+                   | 0 => fst (MKripkeFrame n' b2 b1)
+                   | S d' => fst (MKripkeFrame n' (SelfMBot d') b1)
+                 end
+            | OtherMBot delay
+              => match delay with
+                   | 0 => snd (MKripkeFrame n' b2 b1)
+                   | S d' => fst (MKripkeFrame n' (OtherMBot d') b1)
+                 end
             | MODAL_BASED_ON ls f =>
               f (List.map
                    (fun b1b2 =>
@@ -119,9 +141,9 @@ CoFixpoint MKripkeFrames_from (n : nat) (b1 : MBot) (b2 : MBot) : stream (BotRes
 Definition CooperateMBot : MBot := CompleteMBot MC.
 Definition DefectMBot : MBot := CompleteMBot MD.
 Definition OppositeMBotOf (b : MBot) : MBot := MODAL_BASED_ON
-                                                 ((b, SelfMBot)::nil)
+                                                 ((b, SelfMBot 0)::nil)
                                                  (fun res => opposite_result (fold_and_res res)).
-Definition OppositeMBot := CompleteMBot (OppositeMBotOf OtherMBot).
+Definition OppositeMBot := CompleteMBot (OppositeMBotOf (OtherMBot 0)).
 Notation "B0 /\\ B1 /\\ .. /\\ Bn"
   := (MODAL_BASED_ON
         (Datatypes.cons B0%mbot (Datatypes.cons B1%mbot .. (Datatypes.cons Bn%mbot nil) .. ))
@@ -132,11 +154,11 @@ Notation "B0 /\\ B1 /\\ .. /\\ Bn"
 Notation CmB := CooperateMBot.
 Notation DmB := DefectMBot.
 Notation "~ B" := (OppositeMBotOf B) : mbot_scope.
-Definition FairMBot : MBot := CompleteMBot OtherMBot.
+Definition FairMBot : MBot := CompleteMBot (OtherMBot 0).
 Notation FmB := FairMBot.
-Definition PrudentMBot : MBot := CompleteMBot (CompleteMBot ((OtherMBot, SelfMBot) /\\ (WaitMBot (~OtherMBot), DmB))).
+Definition PrudentMBot : MBot := CompleteMBot ((OtherMBot 0, SelfMBot 0) /\\ (~OtherMBot 1, DmB)).
 Definition TrollMBot : MBot := CompleteMBot (MODAL_BASED_ON
-                                               ((OtherMBot, DmB)::nil)
+                                               ((OtherMBot 0, DmB)::nil)
                                                (fun res => opposite_result (fold_and_res res))).
 
 Definition IsEventually (b : MBot * MBot) (r : BotResult * BotResult)
@@ -180,8 +202,16 @@ Proof.
   induction m; simpl in *; trivial; rewrite IHm; reflexivity.
 Qed.
 
-Eval compute in MKripkeFrame 4 PrudentMBot PrudentMBot.
-Eval compute in MKripkeFrame 4 PrudentMBot DmB.
+Eval compute in MKripkeFrame 2 PrudentMBot PrudentMBot.
+Eval compute in MKripkeFrame 2 PrudentMBot DmB.
+
+Goal nat -> True.
+  intro m.
+  pose (MKripkeFrame (3 + m) PrudentMBot PrudentMBot) as p.
+  simpl in p.
+  destruct m.
+  change (MKripkeFrame ?x) with (MKripkeFrame' MKripkeFrame x) in p.
+  unfold MKripkeFrame' in p.
 
 
 (*Class ClassOfMBots := is_good_bot : MBot -> Prop.
